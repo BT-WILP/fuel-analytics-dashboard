@@ -37,14 +37,8 @@ df["Mileage"] = df["Distance"] / df["Qty"]
 # Cost per litre
 df["Cost_per_Litre"] = df["Cost"] / df["Qty"]
 
-# Cost per km
-df["Cost_per_KM"] = df["Cost"] / df["Distance"]
-
 # Days between refills
 df["Days_Between"] = df["Date"].diff().dt.days
-
-# Fuel per dot
-df["Fuel_per_Dot"] = df["Qty"] / df["Battery"]
 
 # Drop first row (NaN due to diff)
 df = df.dropna().reset_index(drop=True)
@@ -59,12 +53,7 @@ col1, col2, col3, col4 = st.columns(4)
 col1.metric("Total Fuel Used (L)", round(df["Qty"].sum(), 2))
 col2.metric("Total Money Spent (INR)", round(df["Cost"].sum(), 2))
 col3.metric("Average Mileage (km/L)", round(df["Mileage"].mean(), 2))
-col4.metric("Average Cost per KM (INR)", round(df["Cost_per_KM"].mean(), 2))
-
-col5, col6 = st.columns(2)
-
-col5.metric("Average Days Between Refills", round(df["Days_Between"].mean(), 2))
-col6.metric("Average Fuel per Dot (L)", round(df["Fuel_per_Dot"].mean(), 2))
+col4.metric("Average Days Between Refills", round(df["Days_Between"].mean(), 2))
 
 st.divider()
 
@@ -73,6 +62,5 @@ st.divider()
 # -----------------------------
 st.subheader("📄 Complete Processed Dataset (Read-Only)")
 st.dataframe(df)
-
 
 
