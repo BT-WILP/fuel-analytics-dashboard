@@ -222,58 +222,52 @@ st.markdown(f"""
   .stMetric {{ display: none; }}
   div[data-testid="metric-container"] {{ display: none; }}
 
-
-  /* Futuristic animations */
-  .hero{
+  /* ===== Futuristic UI ===== */
+  .hero {{
       animation: floatHero 6s ease-in-out infinite;
-      position:relative;
-      overflow:hidden;
-  }
-  .hero::before{
+      position: relative;
+      overflow: hidden;
+  }}
+  .hero::before {{
       content:'';
       position:absolute;
-      top:0;left:-120%;
-      width:60%;height:100%;
+      top:0;
+      left:-120%;
+      width:50%;
+      height:100%;
       background:linear-gradient(90deg,transparent,rgba(255,255,255,.08),transparent);
       animation:shine 5s linear infinite;
-  }
-  .hero-accent{
+  }}
+  .hero-accent {{
       animation:pulseGlow 2.5s ease-in-out infinite;
-  }
-  .kpi-card,.chart-card,.forecast-box{
-      transition:all .28s ease;
-  }
-  .kpi-card:hover,.chart-card:hover,.forecast-box:hover{
-      transform:translateY(-6px) scale(1.01);
-      box-shadow:0 0 24px rgba(88,166,255,.22);
+  }}
+  .kpi-card,.forecast-box {{
+      transition:transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+  }}
+  .kpi-card:hover,.forecast-box:hover {{
+      transform:translateY(-6px);
+      box-shadow:0 0 22px rgba(88,166,255,.35);
       border-color:#58A6FF;
-  }
-  .section-header{
+  }}
+  .section-header {{
       animation:fadeUp .8s ease both;
-  }
-  .forecast-box{
-      animation:borderPulse 3s infinite;
-  }
-  @keyframes fadeUp{
-      from{opacity:0;transform:translateY(18px);}
-      to{opacity:1;transform:translateY(0);}
-  }
-  @keyframes pulseGlow{
-      0%,100%{transform:scale(1);filter:drop-shadow(0 0 8px #F78166);}
-      50%{transform:scale(1.08);filter:drop-shadow(0 0 20px #58A6FF);}
-  }
-  @keyframes floatHero{
-      0%,100%{transform:translateY(0);}
-      50%{transform:translateY(-4px);}
-  }
-  @keyframes shine{
-      from{left:-120%;}
-      to{left:160%;}
-  }
-  @keyframes borderPulse{
-      0%,100%{box-shadow:0 0 10px rgba(88,166,255,.18);}
-      50%{box-shadow:0 0 28px rgba(88,166,255,.35);}
-  }
+  }}
+  @keyframes fadeUp {{
+      from {{ opacity:0; transform:translateY(18px); }}
+      to {{ opacity:1; transform:translateY(0); }}
+  }}
+  @keyframes pulseGlow {{
+      0%,100% {{ transform:scale(1); filter:drop-shadow(0 0 8px #F78166); }}
+      50% {{ transform:scale(1.08); filter:drop-shadow(0 0 20px #58A6FF); }}
+  }}
+  @keyframes floatHero {{
+      0%,100% {{ transform:translateY(0); }}
+      50% {{ transform:translateY(-4px); }}
+  }}
+  @keyframes shine {{
+      from {{ left:-120%; }}
+      to {{ left:150%; }}
+  }}
 
 </style>
 """, unsafe_allow_html=True)
