@@ -221,6 +221,60 @@ st.markdown(f"""
   /* Streamlit default overrides */
   .stMetric {{ display: none; }}
   div[data-testid="metric-container"] {{ display: none; }}
+
+
+  /* Futuristic animations */
+  .hero{
+      animation: floatHero 6s ease-in-out infinite;
+      position:relative;
+      overflow:hidden;
+  }
+  .hero::before{
+      content:'';
+      position:absolute;
+      top:0;left:-120%;
+      width:60%;height:100%;
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,.08),transparent);
+      animation:shine 5s linear infinite;
+  }
+  .hero-accent{
+      animation:pulseGlow 2.5s ease-in-out infinite;
+  }
+  .kpi-card,.chart-card,.forecast-box{
+      transition:all .28s ease;
+  }
+  .kpi-card:hover,.chart-card:hover,.forecast-box:hover{
+      transform:translateY(-6px) scale(1.01);
+      box-shadow:0 0 24px rgba(88,166,255,.22);
+      border-color:#58A6FF;
+  }
+  .section-header{
+      animation:fadeUp .8s ease both;
+  }
+  .forecast-box{
+      animation:borderPulse 3s infinite;
+  }
+  @keyframes fadeUp{
+      from{opacity:0;transform:translateY(18px);}
+      to{opacity:1;transform:translateY(0);}
+  }
+  @keyframes pulseGlow{
+      0%,100%{transform:scale(1);filter:drop-shadow(0 0 8px #F78166);}
+      50%{transform:scale(1.08);filter:drop-shadow(0 0 20px #58A6FF);}
+  }
+  @keyframes floatHero{
+      0%,100%{transform:translateY(0);}
+      50%{transform:translateY(-4px);}
+  }
+  @keyframes shine{
+      from{left:-120%;}
+      to{left:160%;}
+  }
+  @keyframes borderPulse{
+      0%,100%{box-shadow:0 0 10px rgba(88,166,255,.18);}
+      50%{box-shadow:0 0 28px rgba(88,166,255,.35);}
+  }
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -389,6 +443,162 @@ with c5:
     ), unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────
+# FORECAST
+# ─────────────────────────────────────────
+section("🔮", "Next Refill Forecast")
+
+# ── Rolling-trend exponential smoothing forecast ─────────────────────────────
+# Instead of a flat average, we use exponential smoothing so recent refills
+# carry more weight, and the rate of change (trend) is tracked separately.
+
+def exp_smooth_with_trend(series, alpha=0.4, beta=0.3):
+    """Double exponential smoothing (Holt's method)."""
+    s = [series.iloc[0]]
+    t = [series.iloc[1] - series.iloc[0] if len(series) > 1 else 0]
+    for i in range(1, len(series)):
+        s_new = alpha * series.iloc[i] + (1 - alpha) * (s[-1] + t[-1])
+        t_new = beta * (s_new - s[-1]) + (1 - beta) * t[-1]
+        s.append(s_new)
+        t.append(t_new)
+    level, trend = s[-1], t[-1]
+    return level, trend
+
+# Smooth km/day and distance per tank — these drive the forecast
+km_day_level,    km_day_trend    = exp_smooth_with_trend(fdf["KM_per_Day"],  alpha=0.35, beta=0.25)
+dist_level,      dist_trend      = exp_smooth_with_trend(fdf["Distance"],    alpha=0.35, beta=0.25)
+qty_level,       _               = exp_smooth_with_trend(fdf["Qty"],         alpha=0.35, beta=0.25)
+cpl_level,       cpl_trend       = exp_smooth_with_trend(fdf["Cost_per_Litre"], alpha=0.35, beta=0.25)
+
+# Project km/day into the future with trend dampening (φ = 0.9)
+phi = 0.9
+def project_km_day(h):
+    """Damped-trend forecast for km/day h steps ahead."""
+    damping = sum(phi**j for j in range(1, h+1))
+    return km_day_level + km_day_trend * damping
+
+# Find days until tank empties: integrate projected daily km
+cumulative_km = 0.0
+days_until = 0
+while cumulative_km < dist_level and days_until < 365:
+    days_until += 1
+    cumulative_km += project_km_day(days_until)
+
+refill_date    = fdf["Date"].iloc[-1] + pd.Timedelta(days=days_until)
+predicted_cost = qty_level * cpl_level
+
+# Build forward projection curve
+fwd_days   = list(range(1, forecast_days + 1))
+fwd_km_day = [project_km_day(h) for h in fwd_days]
+fwd_cum_km = np.cumsum(fwd_km_day)
+remaining  = np.clip(dist_level - fwd_cum_km, 0, None)
+future_dates = pd.date_range(fdf["Date"].iloc[-1], periods=forecast_days + 1, freq="D")[1:]
+
+# Historical km/day with smoothed overlay for the chart
+smooth_series = []
+s = fdf["KM_per_Day"].iloc[0]
+t_val = 0.0
+for v in fdf["KM_per_Day"]:
+    s_new = 0.35 * v + 0.65 * (s + t_val)
+    t_val = 0.3 * (s_new - s) + 0.7 * t_val
+    s = s_new
+    smooth_series.append(s)
+fdf["KM_per_Day_Smooth"] = smooth_series
+
+col1, col2 = st.columns([1.4, 1])
+
+with col1:
+    st.markdown(f"""
+    <div class="forecast-box">
+      <div style="font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:{TEXT_MUTED};margin-bottom:16px">
+        Forecast — Holt's Damped-Trend Smoothing
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <div>
+          <div style="color:{TEXT_MUTED};font-size:11px;margin-bottom:4px">NEXT REFILL DATE</div>
+          <div style="color:{ACCENT2};font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace">
+            {refill_date.strftime('%d %b %Y')}
+          </div>
+        </div>
+        <div>
+          <div style="color:{TEXT_MUTED};font-size:11px;margin-bottom:4px">DAYS REMAINING</div>
+          <div style="color:{TEXT};font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace">
+            ~{days_until} days
+          </div>
+        </div>
+        <div>
+          <div style="color:{TEXT_MUTED};font-size:11px;margin-bottom:4px">EXPECTED COST</div>
+          <div style="color:{ACCENT_WARN};font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace">
+            ₹{predicted_cost:,.0f}
+          </div>
+        </div>
+        <div>
+          <div style="color:{TEXT_MUTED};font-size:11px;margin-bottom:4px">SMOOTHED KM/DAY</div>
+          <div style="color:{TEXT};font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace">
+            {km_day_level:.1f} km
+          </div>
+        </div>
+        <div style="grid-column:span 2">
+          <div style="color:{TEXT_MUTED};font-size:11px;margin-bottom:6px">KM/DAY TREND</div>
+          <div style="color:{'#3FB950' if km_day_trend >= 0 else '#F78166'};font-size:13px;font-weight:600">
+            {'▲ Increasing' if km_day_trend >= 0 else '▼ Decreasing'} usage
+            ({km_day_trend:+.2f} km/day per refill interval)
+          </div>
+          <div style="color:{TEXT_MUTED};font-size:11px;margin-top:4px">
+            Fuel price trend: {cpl_trend:+.2f} ₹/L per interval
+          </div>
+        </div>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+with col2:
+    fig_fwd = go.Figure()
+    fig_fwd.add_trace(go.Scatter(
+        x=future_dates, y=remaining,
+        fill="tozeroy",
+        fillcolor="rgba(88,166,255,0.12)",
+        line=dict(color=ACCENT2, width=2),
+        name="Est. range remaining",
+        hovertemplate="%{x|%d %b}: ~%{y:.0f} km left<extra></extra>"
+    ))
+    fig_fwd.add_hline(y=0, line_color=ACCENT, line_dash="dot",
+                      annotation_text="Refill needed", annotation_font_color=ACCENT)
+    fig_fwd.update_layout(**PLOTLY_THEME, height=220, title="Projected Tank Range",
+                          yaxis_title="Est. km remaining", showlegend=False)
+    st.plotly_chart(fig_fwd, use_container_width=True)
+
+# KM/Day history with smoothed overlay
+fig_kmd = go.Figure()
+fig_kmd.add_trace(go.Scatter(
+    x=fdf["Date"], y=fdf["KM_per_Day"],
+    mode="markers", name="Actual km/day",
+    marker=dict(size=6, color=ACCENT2, opacity=0.5),
+    hovertemplate="%{x|%d %b %Y}: %{y:.1f} km/day<extra></extra>"
+))
+fig_kmd.add_trace(go.Scatter(
+    x=fdf["Date"], y=fdf["KM_per_Day_Smooth"],
+    mode="lines", name="Smoothed trend",
+    line=dict(color=ACCENT3, width=2),
+    hovertemplate="Smoothed: %{y:.1f} km/day<extra></extra>"
+))
+# Forward projection
+fwd_smooth_dates = [fdf["Date"].iloc[-1]] + list(future_dates[:15])
+fwd_smooth_vals  = [km_day_level] + [project_km_day(h) for h in range(1, 16)]
+fig_kmd.add_trace(go.Scatter(
+    x=fwd_smooth_dates, y=fwd_smooth_vals,
+    mode="lines", name="Forecast (damped)",
+    line=dict(color=ACCENT_WARN, width=2, dash="dash"),
+    hovertemplate="Forecast: %{y:.1f} km/day<extra></extra>"
+))
+fig_kmd.update_layout(
+    **PLOTLY_THEME, height=260,
+    title="Daily Usage Rate — History & Forecast",
+    yaxis_title="km / day", hovermode="x unified",
+)
+st.plotly_chart(fig_kmd, use_container_width=True)
+
+st.markdown("---")
 
 # ─────────────────────────────────────────
 # MILEAGE OVER TIME  +  REGRESSION
@@ -660,162 +870,6 @@ fig_corr = go.Figure(data=go.Heatmap(
 ))
 fig_corr.update_layout(**PLOTLY_THEME, height=380, title="Pearson Correlation — All Metrics")
 st.plotly_chart(fig_corr, use_container_width=True)
-
-st.markdown("---")
-
-# ─────────────────────────────────────────
-# FORECAST
-# ─────────────────────────────────────────
-section("🔮", "Next Refill Forecast")
-
-# ── Rolling-trend exponential smoothing forecast ─────────────────────────────
-# Instead of a flat average, we use exponential smoothing so recent refills
-# carry more weight, and the rate of change (trend) is tracked separately.
-
-def exp_smooth_with_trend(series, alpha=0.4, beta=0.3):
-    """Double exponential smoothing (Holt's method)."""
-    s = [series.iloc[0]]
-    t = [series.iloc[1] - series.iloc[0] if len(series) > 1 else 0]
-    for i in range(1, len(series)):
-        s_new = alpha * series.iloc[i] + (1 - alpha) * (s[-1] + t[-1])
-        t_new = beta * (s_new - s[-1]) + (1 - beta) * t[-1]
-        s.append(s_new)
-        t.append(t_new)
-    level, trend = s[-1], t[-1]
-    return level, trend
-
-# Smooth km/day and distance per tank — these drive the forecast
-km_day_level,    km_day_trend    = exp_smooth_with_trend(fdf["KM_per_Day"],  alpha=0.35, beta=0.25)
-dist_level,      dist_trend      = exp_smooth_with_trend(fdf["Distance"],    alpha=0.35, beta=0.25)
-qty_level,       _               = exp_smooth_with_trend(fdf["Qty"],         alpha=0.35, beta=0.25)
-cpl_level,       cpl_trend       = exp_smooth_with_trend(fdf["Cost_per_Litre"], alpha=0.35, beta=0.25)
-
-# Project km/day into the future with trend dampening (φ = 0.9)
-phi = 0.9
-def project_km_day(h):
-    """Damped-trend forecast for km/day h steps ahead."""
-    damping = sum(phi**j for j in range(1, h+1))
-    return km_day_level + km_day_trend * damping
-
-# Find days until tank empties: integrate projected daily km
-cumulative_km = 0.0
-days_until = 0
-while cumulative_km < dist_level and days_until < 365:
-    days_until += 1
-    cumulative_km += project_km_day(days_until)
-
-refill_date    = fdf["Date"].iloc[-1] + pd.Timedelta(days=days_until)
-predicted_cost = qty_level * cpl_level
-
-# Build forward projection curve
-fwd_days   = list(range(1, forecast_days + 1))
-fwd_km_day = [project_km_day(h) for h in fwd_days]
-fwd_cum_km = np.cumsum(fwd_km_day)
-remaining  = np.clip(dist_level - fwd_cum_km, 0, None)
-future_dates = pd.date_range(fdf["Date"].iloc[-1], periods=forecast_days + 1, freq="D")[1:]
-
-# Historical km/day with smoothed overlay for the chart
-smooth_series = []
-s = fdf["KM_per_Day"].iloc[0]
-t_val = 0.0
-for v in fdf["KM_per_Day"]:
-    s_new = 0.35 * v + 0.65 * (s + t_val)
-    t_val = 0.3 * (s_new - s) + 0.7 * t_val
-    s = s_new
-    smooth_series.append(s)
-fdf["KM_per_Day_Smooth"] = smooth_series
-
-col1, col2 = st.columns([1.4, 1])
-
-with col1:
-    st.markdown(f"""
-    <div class="forecast-box">
-      <div style="font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:{TEXT_MUTED};margin-bottom:16px">
-        Forecast — Holt's Damped-Trend Smoothing
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-        <div>
-          <div style="color:{TEXT_MUTED};font-size:11px;margin-bottom:4px">NEXT REFILL DATE</div>
-          <div style="color:{ACCENT2};font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace">
-            {refill_date.strftime('%d %b %Y')}
-          </div>
-        </div>
-        <div>
-          <div style="color:{TEXT_MUTED};font-size:11px;margin-bottom:4px">DAYS REMAINING</div>
-          <div style="color:{TEXT};font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace">
-            ~{days_until} days
-          </div>
-        </div>
-        <div>
-          <div style="color:{TEXT_MUTED};font-size:11px;margin-bottom:4px">EXPECTED COST</div>
-          <div style="color:{ACCENT_WARN};font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace">
-            ₹{predicted_cost:,.0f}
-          </div>
-        </div>
-        <div>
-          <div style="color:{TEXT_MUTED};font-size:11px;margin-bottom:4px">SMOOTHED KM/DAY</div>
-          <div style="color:{TEXT};font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace">
-            {km_day_level:.1f} km
-          </div>
-        </div>
-        <div style="grid-column:span 2">
-          <div style="color:{TEXT_MUTED};font-size:11px;margin-bottom:6px">KM/DAY TREND</div>
-          <div style="color:{'#3FB950' if km_day_trend >= 0 else '#F78166'};font-size:13px;font-weight:600">
-            {'▲ Increasing' if km_day_trend >= 0 else '▼ Decreasing'} usage
-            ({km_day_trend:+.2f} km/day per refill interval)
-          </div>
-          <div style="color:{TEXT_MUTED};font-size:11px;margin-top:4px">
-            Fuel price trend: {cpl_trend:+.2f} ₹/L per interval
-          </div>
-        </div>
-      </div>
-    </div>""", unsafe_allow_html=True)
-
-with col2:
-    fig_fwd = go.Figure()
-    fig_fwd.add_trace(go.Scatter(
-        x=future_dates, y=remaining,
-        fill="tozeroy",
-        fillcolor="rgba(88,166,255,0.12)",
-        line=dict(color=ACCENT2, width=2),
-        name="Est. range remaining",
-        hovertemplate="%{x|%d %b}: ~%{y:.0f} km left<extra></extra>"
-    ))
-    fig_fwd.add_hline(y=0, line_color=ACCENT, line_dash="dot",
-                      annotation_text="Refill needed", annotation_font_color=ACCENT)
-    fig_fwd.update_layout(**PLOTLY_THEME, height=220, title="Projected Tank Range",
-                          yaxis_title="Est. km remaining", showlegend=False)
-    st.plotly_chart(fig_fwd, use_container_width=True)
-
-# KM/Day history with smoothed overlay
-fig_kmd = go.Figure()
-fig_kmd.add_trace(go.Scatter(
-    x=fdf["Date"], y=fdf["KM_per_Day"],
-    mode="markers", name="Actual km/day",
-    marker=dict(size=6, color=ACCENT2, opacity=0.5),
-    hovertemplate="%{x|%d %b %Y}: %{y:.1f} km/day<extra></extra>"
-))
-fig_kmd.add_trace(go.Scatter(
-    x=fdf["Date"], y=fdf["KM_per_Day_Smooth"],
-    mode="lines", name="Smoothed trend",
-    line=dict(color=ACCENT3, width=2),
-    hovertemplate="Smoothed: %{y:.1f} km/day<extra></extra>"
-))
-# Forward projection
-fwd_smooth_dates = [fdf["Date"].iloc[-1]] + list(future_dates[:15])
-fwd_smooth_vals  = [km_day_level] + [project_km_day(h) for h in range(1, 16)]
-fig_kmd.add_trace(go.Scatter(
-    x=fwd_smooth_dates, y=fwd_smooth_vals,
-    mode="lines", name="Forecast (damped)",
-    line=dict(color=ACCENT_WARN, width=2, dash="dash"),
-    hovertemplate="Forecast: %{y:.1f} km/day<extra></extra>"
-))
-fig_kmd.update_layout(
-    **PLOTLY_THEME, height=260,
-    title="Daily Usage Rate — History & Forecast",
-    yaxis_title="km / day", hovermode="x unified",
-)
-st.plotly_chart(fig_kmd, use_container_width=True)
 
 st.markdown("---")
 
