@@ -271,13 +271,10 @@ def load_data():
     # Fix: actual CSV uses 4-digit year (DD-MM-YYYY), not 2-digit
     df["Date"] = pd.to_datetime(df["Date"], format="%d-%m-%Y", dayfirst=True)
 
-    # Flag rows where date order contradicts odometer order (data entry errors)
-    # e.g. KM=11033 dated 13-08-2022 but odometer says it should be 2023
-    km_rank   = df["KM"].rank(method="first")
-    date_rank = df["Date"].rank(method="first")
-    df["_date_mismatch"] = (km_rank - date_rank).abs() > 2
-
+    # Sort by date, then flag any row where KM is not higher than the previous.
+    # This is the only reliable signal that a date was entered incorrectly.
     df = df.sort_values("Date").reset_index(drop=True)
+    df["_date_mismatch"] = df["KM"].diff().fillna(1) <= 0
 
     # ── Derived fields ──
     df["Distance"]       = df["KM"].diff()
@@ -311,11 +308,11 @@ def load_data():
 
 df = load_data()
 
-# Data quality warnings
+# Data quality warnings — only fires if KM goes backwards after sorting by date
 if "_date_mismatch" in df.columns and df["_date_mismatch"].any():
     bad_rows = df[df["_date_mismatch"]][["Date", "KM"]]
     km_list = ", ".join(bad_rows["KM"].astype(str).tolist())
-    st.warning(f"⚠️ **{len(bad_rows)} row(s) have dates that don't match odometer sequence** — likely a data entry typo. Affected KM reading(s): {km_list}. Check the raw data table at the bottom.")
+    st.warning(f"⚠️ **{len(bad_rows)} row(s) have a date that appears wrong** — the odometer reading goes backwards at KM: {km_list}. The date on that row is likely a typo. Fix it in Fuel.csv and re-deploy.")
 
 # ─────────────────────────────────────────
 # SIDEBAR — FILTERS
