@@ -823,34 +823,6 @@ st.plotly_chart(fig_kmd, use_container_width=True)
 st.markdown("---")
 
 # ─────────────────────────────────────────
-# BATTERY LOG
-# ─────────────────────────────────────────
-if "Battery" in fdf.columns and fdf["Battery"].notna().any():
-    section("🔋", "Battery Voltage Log")
-    bdf = fdf[fdf["Battery"].notna()].copy()
-    try:
-        bdf["Battery"] = pd.to_numeric(bdf["Battery"], errors="coerce")
-        bdf = bdf.dropna(subset=["Battery"])
-        if not bdf.empty:
-            fig_bat = go.Figure()
-            fig_bat.add_trace(go.Scatter(
-                x=bdf["Date"], y=bdf["Battery"],
-                mode="lines+markers",
-                line=dict(color=ACCENT3, width=2),
-                marker=dict(size=7, color=ACCENT3),
-                hovertemplate="<b>%{x|%d %b %Y}</b><br>Battery: %{y:.2f}V<extra></extra>",
-                name="Battery (V)"
-            ))
-            fig_bat.add_hline(y=12.0, line_color=ACCENT_WARN, line_dash="dash",
-                              annotation_text="Low threshold (12V)")
-            fig_bat.update_layout(**PLOTLY_THEME, height=260,
-                                  yaxis_title="Voltage (V)", title="Battery Voltage at Refill")
-            st.plotly_chart(fig_bat, use_container_width=True)
-            st.markdown("---")
-    except Exception:
-        pass
-
-# ─────────────────────────────────────────
 # RAW DATA
 # ─────────────────────────────────────────
 with st.expander("📄 View full processed dataset"):
