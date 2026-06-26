@@ -267,7 +267,16 @@ def load_data():
         st.stop()
 
     df.columns = ["Qty", "KM", "Date", "Battery", "Cost"]
-    df["Date"] = pd.to_datetime(df["Date"], format="%d-%m-%y", dayfirst=True)
+
+    # Fix: actual CSV uses 4-digit year (DD-MM-YYYY), not 2-digit
+    df["Date"] = pd.to_datetime(df["Date"], format="%d-%m-%Y", dayfirst=True)
+
+    # Flag rows where date order contradicts odometer order (data entry errors)
+    # e.g. KM=11033 dated 13-08-2022 but odometer says it should be 2023
+    km_rank   = df["KM"].rank(method="first")
+    date_rank = df["Date"].rank(method="first")
+    df["_date_mismatch"] = (km_rank - date_rank).abs() > 2
+
     df = df.sort_values("Date").reset_index(drop=True)
 
     # ── Derived fields ──
@@ -301,6 +310,12 @@ def load_data():
     return df
 
 df = load_data()
+
+# Data quality warnings
+if "_date_mismatch" in df.columns and df["_date_mismatch"].any():
+    bad_rows = df[df["_date_mismatch"]][["Date", "KM"]]
+    km_list = ", ".join(bad_rows["KM"].astype(str).tolist())
+    st.warning(f"⚠️ **{len(bad_rows)} row(s) have dates that don't match odometer sequence** — likely a data entry typo. Affected KM reading(s): {km_list}. Check the raw data table at the bottom.")
 
 # ─────────────────────────────────────────
 # SIDEBAR — FILTERS
